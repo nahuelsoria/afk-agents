@@ -1,0 +1,23 @@
+{
+  "name": "afk-agents",
+  "version": "0.1.0",
+  "description": "Scaffold and manage unattended AFK agents: cron + bash + Telegram + the Claude CLI. Zero dependencies.",
+  "keywords": ["cron", "agents", "automation", "monitoring", "telegram", "claude", "devops", "vps", "self-hosted"],
+  "license": "MIT",
+  "author": "Nahuel Soria",
+  "type": "commonjs",
+  "bin": {
+    "afk": "bin/afk.js"
+  },
+  "files": [
+    "bin/",
+    "templates/",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "test": "bash test/smoke.sh"
+  }
+}
