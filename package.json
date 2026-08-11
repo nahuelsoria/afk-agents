@@ -5,6 +5,14 @@
   "keywords": ["cron", "agents", "automation", "monitoring", "telegram", "claude", "devops", "vps", "self-hosted"],
   "license": "MIT",
   "author": "Nahuel Soria",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nahuelsoria/afk-agents.git"
+  },
+  "homepage": "https://github.com/nahuelsoria/afk-agents#readme",
+  "bugs": {
+    "url": "https://github.com/nahuelsoria/afk-agents/issues"
+  },
   "type": "commonjs",
   "bin": {
     "afk": "bin/afk.js"
