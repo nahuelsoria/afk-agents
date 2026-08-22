@@ -75,4 +75,70 @@ $AFK rm triage >/dev/null
 grep -q 'afk:triage' "$TMP/crontab.txt" && fail "rm left the cron line"
 pass "rm deletes files and cron line"
 
+# ---- regressions: the crontab is somebody else's file ------------------------
+
+# A cron line whose marker is a prefix of ours must survive `rm`.
+echo "0 5 * * * /bin/bash /somewhere/else.sh # afk:disk-watch-old" >> "$TMP/crontab.txt"
+$AFK new monitor tmp-neighbour --every 15m >/dev/null
+$AFK rm tmp-neighbour >/dev/null
+grep -q 'afk:disk-watch-old' "$TMP/crontab.txt" || fail "rm deleted a line whose marker was only a prefix match"
+pass "marker matching does not eat neighbouring lines"
+
+# A crontab that cannot be READ must never be WRITTEN. This is the one that
+# could wipe every entry the user had.
+BADCRON="$TMP/badcron"
+cat > "$BADCRON" <<EOF
+#!/bin/bash
+if [ "\${1:-}" = "-l" ]; then echo "crontab: cannot open spool" >&2; exit 1; fi
+if [ "\${1:-}" = "-" ]; then cat > "$TMP/badcron-write.txt"; exit 0; fi
+exit 0
+EOF
+chmod +x "$BADCRON"
+rm -f "$TMP/badcron-write.txt"
+if AFK_CRONTAB_CMD="$BADCRON" $AFK new monitor doomed --every 10m >/dev/null 2>"$TMP/err.txt"; then
+    fail "new succeeded even though the crontab could not be read"
+fi
+[ -f "$TMP/badcron-write.txt" ] && fail "wrote the crontab after failing to read it (would drop every user entry)"
+grep -qi 'refusing to touch it' "$TMP/err.txt" || fail "unreadable crontab did not produce the refusal message: $(cat "$TMP/err.txt")"
+pass "an unreadable crontab is refused, not overwritten"
+
+# "no crontab for <user>" still means empty, not an error.
+EMPTYCRON="$TMP/emptycron"
+cat > "$EMPTYCRON" <<EOF
+#!/bin/bash
+STORE="$TMP/emptycron.txt"
+touch "\$STORE"
+if [ "\${1:-}" = "-l" ]; then
+    if [ -s "\$STORE" ]; then cat "\$STORE"; exit 0; fi
+    echo "no crontab for nobody" >&2; exit 1
+fi
+if [ "\${1:-}" = "-" ]; then cat > "\$STORE"; exit 0; fi
+exit 0
+EOF
+chmod +x "$EMPTYCRON"
+AFK_CRONTAB_CMD="$EMPTYCRON" AGENTS_HOME="$TMP/agents2" $AFK init >/dev/null
+AFK_CRONTAB_CMD="$EMPTYCRON" AGENTS_HOME="$TMP/agents2" $AFK new monitor first --every 20m >/dev/null
+grep -q 'afk:first' "$TMP/emptycron.txt" || fail "first agent on an empty crontab was not scheduled"
+pass "an empty crontab is still treated as empty"
+
+# ---- regressions: bad flags fail with a message, not a stack trace ----------
+
+if $AFK new monitor bogus --schedule "no soy cron" >/dev/null 2>"$TMP/err.txt"; then
+    fail "--schedule accepted a non-cron string"
+fi
+grep -q '5 cron fields' "$TMP/err.txt" || fail "--schedule rejection message unclear: $(cat "$TMP/err.txt")"
+[ -d "$AGENTS_HOME/bogus" ] && fail "--schedule rejection still created the agent dir"
+
+if $AFK new monitor bogus2 --schedule "0 3 * * * echo hola" >/dev/null 2>&1; then
+    fail "--schedule accepted 6 fields (cron would run the extra field as a command)"
+fi
+pass "--schedule validates the cron expression"
+
+if $AFK new monitor bogus3 --every >/dev/null 2>"$TMP/err.txt"; then
+    fail "--every with no value succeeded"
+fi
+grep -q 'needs a value' "$TMP/err.txt" || fail "--every without value did not print a usage message: $(cat "$TMP/err.txt")"
+grep -qi 'TypeError\|at Object\.' "$TMP/err.txt" && fail "--every without value printed a raw stack trace"
+pass "flags without a value fail with a message, not a stack trace"
+
 echo "ALL PASS"

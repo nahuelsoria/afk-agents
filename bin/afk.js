@@ -34,7 +34,26 @@ function readTemplate(file) {
 //   --at 09:00                -> 0 9 * * *      (daily)
 //   --schedule "raw 5 fields" -> used verbatim
 function buildSchedule(opts) {
-  if (opts.schedule) return opts.schedule.trim();
+  // The parser marks a flag given without a value as `true`. Reaching .trim()
+  // on that threw a raw Node stack trace at the user.
+  for (const flag of ["schedule", "every", "at", "day"]) {
+    if (opts[flag] === true) die(`--${flag} needs a value (try 'afk help')`);
+  }
+
+  if (opts.schedule !== undefined) {
+    const raw = String(opts.schedule).trim();
+    // Verbatim used to mean unchecked: "no soy cron" or a 6-field line went
+    // straight into the crontab, where cron either ignores it or runs something
+    // the user never wrote.
+    const fields = raw.split(/\s+/).filter(Boolean);
+    if (fields.length !== 5) {
+      die(`--schedule expects 5 cron fields, got ${fields.length}: "${raw}"`);
+    }
+    if (!fields.every((f) => /^[-0-9*,/]+$/.test(f))) {
+      die(`--schedule has a field that is not a cron expression: "${raw}"`);
+    }
+    return raw;
+  }
 
   const DAYS = { sun: 0, mon: 1, tue: 2, wed: 3, thu: 4, fri: 5, sat: 6 };
 
@@ -70,11 +89,29 @@ function buildSchedule(opts) {
 
 function readCrontab() {
   try {
-    return execFileSync(CRONTAB_CMD, ["-l"], { encoding: "utf8" });
+    return execFileSync(CRONTAB_CMD, ["-l"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    });
   } catch (e) {
-    // No crontab yet exits non-zero with a message on stderr; treat as empty.
-    return "";
+    // "no crontab for <user>" is the ONLY failure that means "empty".
+    // Anything else (cron daemon down, unreadable spool, SELinux, a wrapper
+    // that fails) used to be swallowed as "" here, and installCron would then
+    // write back a crontab containing only its own line: every entry the user
+    // had, silently gone. A tool that edits the crontab must refuse to write
+    // when it could not read.
+    const stderr = String(e.stderr || "");
+    if (/no crontab for/i.test(stderr)) return "";
+    const detail = (stderr.trim() || e.message || "").split("\n")[0];
+    die(`cannot read the crontab (${detail}). Refusing to touch it.`);
   }
+}
+
+// The marker closes the installed line, so match it at the end and not as a
+// substring: "# afk:otro" is contained in "# afk:otronota", and matching loosely
+// meant `afk rm otro` deleted somebody else's line too.
+function lineHasMarker(line, marker) {
+  return line.trimEnd().endsWith(marker);
 }
 
 function writeCrontab(text) {
@@ -88,7 +125,7 @@ function installCron(name, schedule, entryPath) {
   const current = readCrontab();
   const kept = current
     .split("\n")
-    .filter((l) => l.trim() && !l.includes(marker));
+    .filter((l) => l.trim() && !lineHasMarker(l, marker));
   kept.push(line);
   writeCrontab(kept.join("\n"));
   return line;
@@ -96,7 +133,7 @@ function installCron(name, schedule, entryPath) {
 
 function cronLineFor(name) {
   const marker = `# afk:${name}`;
-  const line = readCrontab().split("\n").find((l) => l.includes(marker));
+  const line = readCrontab().split("\n").find((l) => lineHasMarker(l, marker));
   if (!line) return null;
   // Keep only the 5 schedule fields, not the command that follows them.
   return line.slice(0, line.indexOf(marker)).trim().split(/\s+/).slice(0, 5).join(" ");
@@ -159,12 +196,15 @@ function cmdNew(args) {
     die(`fleet not initialized (no shared/ in ${AGENTS_HOME}). Run 'afk init' first.`);
   }
 
+  // Validate the schedule BEFORE writing anything: a rejected flag used to leave
+  // a half-created agent on disk (files, no .afk), which then answered "already
+  // exists" on the next try.
+  const schedule = buildSchedule(args);
+
   const entry = TYPES[type];
   fs.mkdirSync(path.join(dir, "logs"), { recursive: true });
   fs.writeFileSync(path.join(dir, entry), readTemplate(`${type}.sh`));
   fs.chmodSync(path.join(dir, entry), 0o755);
-
-  const schedule = buildSchedule(args);
   let cronLine = null;
   if (schedule) cronLine = installCron(name, schedule, path.join(dir, entry));
 
@@ -250,8 +290,15 @@ function cmdRm(args) {
   if (!fs.existsSync(dir)) die(`no such agent "${name}"`);
   // Remove its cron line too.
   const marker = `# afk:${name}`;
-  const kept = readCrontab().split("\n").filter((l) => l.trim() && !l.includes(marker));
-  try { writeCrontab(kept.join("\n")); } catch {}
+  const kept = readCrontab().split("\n").filter((l) => l.trim() && !lineHasMarker(l, marker));
+  // If the crontab cannot be rewritten, stop before deleting the files: leaving
+  // a live cron line pointing at a directory that no longer exists is worse than
+  // leaving the agent in place, and the old code reported success either way.
+  try {
+    writeCrontab(kept.join("\n"));
+  } catch (e) {
+    die(`could not update the crontab (${String(e.message || e).split("\n")[0]}); "${name}" was left in place`);
+  }
   fs.rmSync(dir, { recursive: true, force: true });
   console.log(`afk: removed "${name}" (files and cron line)`);
 }
