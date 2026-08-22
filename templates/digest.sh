@@ -22,7 +22,7 @@ AGENT="$(basename "$(cd "$(dirname "$0")" && pwd)")"
 DIR="$AGENTS_HOME/$AGENT"
 NOTIFY="$AGENTS_HOME/shared/notify.sh"
 LOGGER="$AGENTS_HOME/shared/log.sh"
-mkdir -p "$DIR/state"
+mkdir -p "$DIR/state" "$DIR/logs"
 
 CLAUDE_TIMEOUT="${CLAUDE_TIMEOUT:-600}"
 CLAUDE_MODEL="${CLAUDE_MODEL:-sonnet}"

@@ -47,7 +47,7 @@ CLAUDE_TIMEOUT="${CLAUDE_TIMEOUT:-900}"   # hard cap per analysis, seconds
 CLAUDE_MODEL="${CLAUDE_MODEL:-sonnet}"
 MAX_TG_CHARS=3500                         # stay under Telegram's 4096 limit
 
-mkdir -p "$QUEUE" "$STATE" "$DIR/done" "$DIR/failed"
+mkdir -p "$QUEUE" "$STATE" "$DIR/done" "$DIR/failed" "$DIR/logs"
 log() { bash "$LOGGER" "$AGENT" "$*"; }
 
 if [ "${1:-}" = "--status" ]; then
